@@ -24,7 +24,7 @@ import wave
 You may simply run the script and comment or uncomment the last lines (train or real test) as you need ...
 '''
 
-def train(dataSong, dataSpeech, analysisPath, outputPath, showCases = True):
+def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases = True):
     tags2classes = {0: "neutral", 1: "calm", 2: "happy", 3: "sad", 4: "angry", 5: "fearful", 6: "disgust",
                     7: "surprised"}
 
@@ -118,7 +118,6 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, showCases = True):
 
         return data, labels
 
-    data_input = "mfccs"
 
     print('loading data ...')
     print('0% ..')
@@ -436,7 +435,8 @@ dataSongPath =  "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_proces
 dataSpeechPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/ravdess-emotional-speech-audio/audio_speech_actors_01-24/"
 analysisPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/data_analysis/"
 outputPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/model/"
-train(dataSongPath, dataSpeechPath, analysisPath, outputPath, showCases = False)
+data_input = "mfccs"
+train(dataSongPath, dataSpeechPath, analysisPath, outputPath, data_input showCases = False)
 
 Notice: concole logging isn't implemented so you may copy the outputs ...
 '''
