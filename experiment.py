@@ -25,8 +25,8 @@ You may simply run the script and comment or uncomment the last lines (train or 
 '''
 
 def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases = True):
-    tags2classes = {0: "neutral", 1: "calm", 2: "happy", 3: "sad", 4: "angry", 5: "fearful", 6: "disgust",
-                    7: "surprised"}
+    # todo maybe improve more possible emotional states
+    tags2classes = {0: "neutral", 1: "calm", 2: "happy", 3: "sad", 4: "angry", 5: "fearful", 6: "disgust", 7: "surprised"}
 
     # Cepstrum coefficient analysis
     def extract_analysis(wav_file_name, task, tag, actor_name, labels_info):
@@ -35,33 +35,41 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
            Output: mfcc_features'''
         y, sr = librosa.load(wav_file_name)
         yt, index = librosa.effects.trim(y,30)  # quit silences (noise)
-        if task == "spectrum":
+        if task == "3-D":
             # mel Spectrogram
-            D = np.abs(librosa.stft(yt, n_fft=1023)) ** 2
+            D = np.abs(librosa.stft(yt, n_fft=256)) ** 2
             D = librosa.util.fix_length(D, 90, mode='edge')
-            S = librosa.feature.melspectrogram(y=yt, sr=sr, n_mels=512, fmax=8000)
+            D = librosa.feature.chroma_stft(S=D, sr=sr, n_chroma=128)
+            # mel Spectrogram (power )
+            S = librosa.feature.melspectrogram(y=yt, sr=sr, n_mels=128, fmax=8000)
             S = librosa.util.fix_length(S, 90, mode='edge')
             S_dB = librosa.power_to_db(S, ref=np.max)
             S_dB = librosa.util.fix_length(S_dB, 90, mode='edge')
+            # tempo features
+            # todo format the shape of tempo (Rythm features)
+            hop_length = 512
+            oenv = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+            tempogram = librosa.feature.tempogram(onset_envelope=oenv,win_length= 128, sr=sr,hop_length = hop_length)
+            tempogram = librosa.util.fix_length(tempogram, 90, mode='edge')
 
             def show_cases():
                 plt.figure(figsize=(10, 4))
-                display.specshow(D, x_axis='time', y_axis='mel', sr=sr, fmax=8000)
-                plt.colorbar(format='%+2.0f freq')
-                plt.title('Mel-frequency spectrogram')
+                librosa.display.specshow(D, y_axis='chroma', x_axis='time')
+                plt.colorbar()
+                plt.title('Chromagram')
                 plt.tight_layout()
-                plt.savefig(analysisPath+"D-" + str(
+                plt.savefig(analysisPath+"Chroma-" + str(
                     actor_name) + "-" + str(labels_info) + "-" + str(tags2classes[tag]) + ".png")
                 plt.clf()
                 plt.cla()
                 plt.close()
 
                 plt.figure(figsize=(10, 4))
-                display.specshow(S, x_axis='time', y_axis='mel', sr=sr, fmax=8000)
-                plt.colorbar(format='%+2.0f freq')
-                plt.title('Mel-frequency spectrogram')
-                plt.tight_layout()
-                plt.savefig(analysisPath+"S-" + str(
+                # We'll truncate the display to a narrower range of tempi
+                librosa.display.specshow(tempogram, sr=sr, hop_length=hop_length, x_axis = 'time', y_axis = 'tempo')
+                plt.legend(frameon=True, framealpha=0.75)
+                plt.colorbar()
+                plt.savefig(analysisPath + "Tempo-" + str(
                     actor_name) + "-" + str(labels_info) + "-" + str(tags2classes[tag]) + ".png")
                 plt.clf()
                 plt.cla()
@@ -72,7 +80,7 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
                 plt.colorbar(format='%+2.0f dB')
                 plt.title('Mel-frequency spectrogram')
                 plt.tight_layout()
-                plt.savefig(analysisPath+"S_dB-" + str(
+                plt.savefig(analysisPath+"MelSpectrogram-" + str(
                     actor_name) + "-" + str(labels_info) + "-" + str(tags2classes[tag]) + ".png")
                 plt.clf()
                 plt.cla()
@@ -80,11 +88,24 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
 
             if showCases:
                 show_cases()
+
             result = np.stack([D, S, S_dB], -1)
-        elif task == "mfccs":
+
+        elif (task == "2-D")or(task == "base"):
             # mfccs
-            result = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
-            result = librosa.util.fix_length(result, 128, mode='edge')
+            result = np.array([])
+            # calculate mfccs
+            mfccs = np.mean(librosa.feature.mfcc(y=yt, sr=sr, n_mfcc=40).T, axis=0)
+            result = np.hstack((result, mfccs))
+            # calculate Chroma
+            stft = np.abs(librosa.stft(yt))
+            chroma=np.mean(librosa.feature.chroma_stft(S=stft, sr=sr).T,axis=0)
+            result=np.hstack((result, chroma))
+            # calculate mel Spectrogram
+            mel = np.mean(librosa.feature.melspectrogram(yt, sr=sr).T, axis=0)
+            result = np.hstack((result, mel))
+            result = np.expand_dims(result, axis=-1) # this is the synthetic 3-D for BiLSTM
+
             def show_cases():
                 plt.figure(figsize=(10, 4))
                 librosa.display.specshow(result, x_axis='time')
@@ -99,7 +120,11 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
 
             if showCases:
                 show_cases()
+
         return result
+
+    # check this warning : /media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/venv/lib/python3.6/site-packages/librosa/core/pitch.py:146: UserWarning: Trying to estimate tuning from empty frequency set.
+    #   warnings.warn('Trying to estimate tuning from empty frequency set.')
 
     def load_data(root_dir, task):
         labels = []
@@ -115,9 +140,7 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
                     labels.append(label)  # normalize labeling (0..7)
                     wav_file_name = os.path.join(root_dir, actor_dir, file)
                     data.append(extract_analysis(wav_file_name, task, label, actor_dir, labels_info))
-
         return data, labels
-
 
     print('loading data ...')
     print('0% ..')
@@ -129,6 +152,25 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
     print('100% ..')
 
     def create_baseline():
+        '''
+        Decision linear layer ...
+        :return:
+        '''
+
+        opt = Adam(lr=1e-4, decay=1e-4)
+        model = Sequential()
+        model.add(Flatten())
+        model.add(Dense(1024))
+        model.add(Activation("relu"))
+        model.add(BatchNormalization())
+        model.add(Dropout(0.7))
+        # softmax classifier
+        model.add(Dense(8))
+        model.add(Activation("softmax"))
+        model.compile(loss='categorical_crossentropy', optimizer=opt, metrics=['accuracy'])
+        return model
+
+    def create_deep_model2D():
         ''': 0.4 acc
         This model uses:
 
@@ -149,32 +191,31 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
     Association Annual Summit and Conference (APSIPA). IEEE, pp. 1–4 .
 
         '''
-
-        # todo optional fine tune the net
+        # optional fine tune the net to avoid overfitting
         ### LSTM model, referred to the model A in the report
         model = Sequential()
         # input the ceptrum coefficient
-        model.add(
-            Bidirectional(LSTM(40, return_sequences=True, input_shape=(40, 1))))  # generate 128 features ctx (RNNs)
-        model.add(Dense(80))
-        model.add(Activation('relu'))
+        model.add( Bidirectional(LSTM(45, return_sequences=True, input_shape=(180, 1))))  # generate 360 features ctx (RNNs)
+        model.add(BatchNormalization())
         model.add(Dropout(0.5))
-        # analyze Cepstral context (forward and backward) based on RNNs
-        model.add(Conv1D(32, 5, padding='same'))  # generate 256 features ctx (CNNs)
-        model.add(Activation('relu'))
+        model.add(Conv1D(32, 3, padding='same'))
+        model.add(Activation("relu"))
         model.add(Dropout(0.5))
-        model.add(MaxPooling1D(pool_size=(4)))  # get the most representative 5 examples (40 : 8 pools)
-        model.add(Conv1D(64, 5, padding='same'))  # get the most likely 128 features
-        model.add(Activation('relu'))
+        model.add(Conv1D(32, 3, padding='same'))
+        model.add(MaxPooling1D(pool_size=2))  # get bet features
+        model.add(Activation("relu"))
+        model.add(BatchNormalization())
         model.add(Dropout(0.5))
         model.add(Flatten())  # flat into only one dimension
-        model.add(Dense(1000, activation='relu'))
+        model.add(Dense(100, activation='relu'))
+        model.add(BatchNormalization())
+        model.add(Dropout(0.7))
         model.add(Dense(8, activation='softmax'))
         # add inference layer based on convolutional CNNs
         model.compile(loss='categorical_crossentropy', optimizer='Adam', metrics=['accuracy'])
         return model
 
-    def create_deep_model():
+    def create_deep_model3D():
         '''
         overall architecture:
 
@@ -196,7 +237,7 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
         reg = l2(0.05)
         init = "he_normal"
         chanDim = -1
-        inputShape = (512, 90, 3)
+        inputShape = (128, 90, 3)
         opt = Adam(lr=1e-4, decay=1e-4)
         # building the model
         model = Sequential()
@@ -279,10 +320,12 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
 
     print('creating the model ...')
     ### train using the Deep model
-    if data_input == "mfccs":
+    if data_input == "2-D":
+        model = create_deep_model2D()
+    elif data_input == "3-D":
+        model = create_deep_model3D()
+    elif data_input == "base":
         model = create_baseline()
-    elif data_input == "spectrum":
-        model = create_deep_model()
 
     # patient early stopping
     es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=50)
@@ -341,7 +384,7 @@ def train(dataSong, dataSpeech, analysisPath, outputPath, data_input, showCases 
     # save model
     model.save(outputPath+"model.h5")
 
-def real_test(intermediumPath, modelPath):
+def real_test(intermediumPath, modelPath, data_input):
     # Setup:
     # $ sudo apt-get install portaudio19-dev python-pyaudio python3-pyaudio
     # pip3.6 install PyAudio
@@ -380,70 +423,108 @@ def real_test(intermediumPath, modelPath):
 
     print("initializing the process")
     print("laoding the test")
-    y, sr = librosa.load(intermediumPath+"test.wav")
+    y, sr = librosa.load(intermediumPath+"test2.wav")
     yt, index = librosa.effects.trim(y, 30)  # quit silences (noise)
-    D = np.abs(librosa.stft(yt, n_fft=1023)) ** 2
-    D = librosa.util.fix_length(D, 90, mode='edge')
-    S = librosa.feature.melspectrogram(y=yt, sr=sr, n_mels=512, fmax=8000)
-    S = librosa.util.fix_length(S, 90, mode='edge')
-    S_dB = librosa.power_to_db(S, ref=np.max)
-    S_dB = librosa.util.fix_length(S_dB, 90, mode='edge')
 
-    plt.figure(figsize=(10, 4))
-    display.specshow(D, x_axis='time', y_axis='mel', sr=sr, fmax=8000)
-    plt.colorbar(format='%+2.0f dB')
-    plt.title('Mel-frequency spectrogram')
-    plt.tight_layout()
-    plt.savefig("example_analysis_D.png")
-    plt.clf()
-    plt.cla()
-    plt.close()
+    if data_input == "3-D":
+        # analysis
+        D = np.abs(librosa.stft(yt, n_fft=256)) ** 2
+        D = librosa.util.fix_length(D, 90, mode='edge')
+        D = librosa.feature.chroma_stft(S=D, sr=sr, n_chroma=128)
+        # mel Spectrogram (power )
+        S = librosa.feature.melspectrogram(y=yt, sr=sr, n_mels=128, fmax=8000)
+        S = librosa.util.fix_length(S, 90, mode='edge')
+        S_dB = librosa.power_to_db(S, ref=np.max)
+        S_dB = librosa.util.fix_length(S_dB, 90, mode='edge')
+        # tempo features
+        # todo format the shape of tempo (Rythm features)
+        hop_length = 512
+        oenv = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+        tempogram = librosa.feature.tempogram(onset_envelope=oenv, win_length=128, sr=sr, hop_length=hop_length)
+        tempogram = librosa.util.fix_length(tempogram, 90, mode='edge')
 
-    plt.figure(figsize=(10, 4))
-    display.specshow(S, x_axis='time', y_axis='mel', sr=sr, fmax=8000)
-    plt.colorbar(format='%+2.0f dB')
-    plt.title('Mel-frequency spectrogram')
-    plt.tight_layout()
-    plt.savefig(intermediumPath+"example_analysis_S.png")
-    plt.clf()
-    plt.cla()
-    plt.close()
+        plt.figure(figsize=(10, 4))
+        librosa.display.specshow(D, y_axis='chroma', x_axis='time')
+        plt.colorbar()
+        plt.title('Chromagram')
+        plt.tight_layout()
+        plt.savefig(intermediumPath + "Chroma.png")
+        plt.clf()
+        plt.cla()
+        plt.close()
 
-    plt.figure(figsize=(10, 4))
-    display.specshow(S_dB, x_axis='time', y_axis='mel', sr=sr, fmax=8000)
-    plt.colorbar(format='%+2.0f dB')
-    plt.title('Mel-frequency spectrogram')
-    plt.tight_layout()
-    plt.savefig(intermediumPath+"example_analysis_SDB.png")
-    plt.clf()
-    plt.cla()
-    plt.close()
+        plt.figure(figsize=(10, 4))
+        # We'll truncate the display to a narrower range of tempi
+        librosa.display.specshow(tempogram, sr=sr, hop_length=hop_length, x_axis='time', y_axis='tempo')
+        plt.legend(frameon=True, framealpha=0.75)
+        plt.colorbar()
+        plt.savefig(intermediumPath + "Tempo.png")
+        plt.clf()
+        plt.cla()
+        plt.close()
 
+        plt.figure(figsize=(10, 4))
+        display.specshow(S_dB, x_axis='time', y_axis='mel', sr=sr, fmax=8000)
+        plt.colorbar(format='%+2.0f dB')
+        plt.title('Mel-frequency spectrogram')
+        plt.tight_layout()
+        plt.savefig(intermediumPath + "MelSpectrogram.png")
+        plt.clf()
+        plt.cla()
+        plt.close()
+        data = np.stack([D, S, S_dB], -1)
+    else:
+        # mfccs
+        result = np.array([])
+        # calculate mfccs
+        mfccs = np.mean(librosa.feature.mfcc(y=yt, sr=sr, n_mfcc=40).T, axis=0)
+        result = np.hstack((result, mfccs))
+        # calculate Chroma
+        stft = np.abs(librosa.stft(yt))
+        chroma = np.mean(librosa.feature.chroma_stft(S=stft, sr=sr).T, axis=0)
+        result = np.hstack((result, chroma))
+        # calculate mel Spectrogram
+        mel = np.mean(librosa.feature.melspectrogram(yt, sr=sr).T, axis=0)
+        result = np.hstack((result, mel))
+        data = np.expand_dims(result, axis=-1)  # this is the synthetic 3-D for BiLSTM
+
+        plt.figure(figsize=(10, 4))
+        librosa.display.specshow(result, x_axis='time')
+        plt.colorbar()
+        plt.title('MFCC')
+        plt.tight_layout()
+        plt.savefig(intermediumPath + "MfCC.png")
+        plt.clf()
+        plt.cla()
+        plt.close()
+
+    data = np.r_[data]
+    data = np.expand_dims(data, axis=0)
     tags2classes = {0: "neutral", 1: "calm", 2: "happy", 3: "sad", 4: "angry", 5: "fearful", 6: "disgust",
                     7: "surprised"}
 
-    data = np.stack([D, S, S_dB], -1)
-    data = np.expand_dims(data, 0)
     model = load_model(modelPath+"model.h5")
     predictions = model.predict(data).argmax(axis=1)
     print(" I think you are bip bop....: {}".format(tags2classes[predictions[0]]))
 
-
-# show cases retrieves feedback of the feature extraction (over all data examples to check)
 '''
+# show cases retrieves feedback of the feature extraction (over all data examples to check)
 dataSongPath =  "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/ravdess-emotional-song-audio/audio_song_actors_01-24/"
 dataSpeechPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/ravdess-emotional-speech-audio/audio_speech_actors_01-24/"
 analysisPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/data_analysis/"
-outputPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/model/"
-data_input = "mfccs"
-train(dataSongPath, dataSpeechPath, analysisPath, outputPath, data_input showCases = False)
+outputPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/baseline/"
+# could be used : 2-D, 3-D and base
+
+train(dataSongPath, dataSpeechPath, analysisPath, outputPath, data_input, showCases = False)
 
 Notice: concole logging isn't implemented so you may copy the outputs ...
+
 '''
 
+data_input =  "3-D"
 # path to generate the live test (with your microphone)
 intermediumPath = "/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/real_test/"
 # path to the model that guesses (the quality of the microphone matters I don't have a nice one but ... still works xD)
-modelPath ="/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/final_model/model/"
-real_test(intermediumPath, modelPath)
+modelPath ="/media/edgar/407d4115-9ff4-45c6-9279-01b62aee0730/Speech_processing/3D/"
+real_test(intermediumPath, modelPath, data_input)
 
